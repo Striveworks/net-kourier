@@ -87,7 +87,7 @@ func (l *gatewayPodTargetLister) getIngressUrls(ctx context.Context, ing *v1alph
 		} else {
 			podPort := strconv.Itoa(int(config.HTTPPortInternal))
 
-			if ingressconfig.FromContextOrDefaults(ctx).Kourier.TrafficIsolation == config.IsolationIngressPort {
+			if l.namespaceLister != nil && ingressconfig.FromContextOrDefaults(ctx).Kourier.TrafficIsolation == config.IsolationIngressPort {
 				ns, err := l.namespaceLister.Get(ing.Namespace)
 				if err != nil {
 					return nil, fmt.Errorf("failed to get the ingress namespace: %w", err)

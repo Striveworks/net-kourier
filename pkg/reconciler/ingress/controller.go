@@ -18,6 +18,8 @@ package ingress
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 
 	v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
@@ -49,6 +51,7 @@ import (
 	filteredFactory "knative.dev/pkg/client/injection/kube/informers/factory/filtered"
 	"knative.dev/pkg/configmap"
 	"knative.dev/pkg/controller"
+	"knative.dev/pkg/injection"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/reconciler"
 )
@@ -70,6 +73,12 @@ var isKourierIngress = reconciler.AnnotationFilterFunc(
 func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl {
 	logger := logging.FromContext(ctx)
 
+	namespace, ok := os.LookupEnv("NAMESPACE_TO_HANDLE")
+	if ok {
+		logger.Infof("restricting to namespace '%v'", namespace)
+		ctx = injection.WithNamespaceScope(ctx, namespace)
+	}
+
 	kubernetesClient := kubeclient.Get(ctx)
 	knativeClient := knativeclient.Get(ctx)
 	ingressInformer := ingressinformer.Get(ctx)
@@ -77,7 +86,6 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 	serviceInformer := serviceinformer.Get(ctx)
 	podInformer := podinformer.Get(ctx)
 	secretInformer := getSecretInformer(ctx)
-	namespaceInformer := nsinformer.Get(ctx)
 
 	// Create a new Cache, with the Readiness endpoint enabled, and the list of current Ingresses.
 	caches, err := generator.NewCaches(ctx, kubernetesClient, config.ExternalAuthz.Enabled)
@@ -88,7 +96,11 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 	r := &Reconciler{
 		caches:          caches,
 		extAuthz:        config.ExternalAuthz.Enabled,
-		namespaceLister: namespaceInformer.Lister(),
+		namespaceLister: nil,
+	}
+	if !ok {
+		namespaceInformer := nsinformer.Get(ctx)
+		r.namespaceLister = namespaceInformer.Lister()
 	}
 
 	impl := v1alpha1ingress.NewImpl(ctx, r, config.KourierIngressClassName, func(impl *controller.Impl) controller.Options {
@@ -162,7 +174,7 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 
 	statusProber := status.NewProber(
 		logger.Named("status-manager"),
-		NewProbeTargetLister(logger, endpointsInformer.Lister(), namespaceInformer.Lister()),
+		NewProbeTargetLister(logger, endpointsInformer.Lister(), r.namespaceLister),
 		func(ing *v1alpha1.Ingress) {
 			logger.Debugf("Ready callback triggered for ingress: %s/%s", ing.Namespace, ing.Name)
 			impl.EnqueueKey(types.NamespacedName{Namespace: ing.Namespace, Name: ing.Name})
@@ -188,7 +200,10 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 			return serviceInformer.Lister().Services(ns).Get(name)
 		},
 		func(name string) (*corev1.Namespace, error) {
-			return namespaceInformer.Lister().Get(name)
+			if r.namespaceLister != nil {
+				return r.namespaceLister.Get(name)
+			}
+			return nil, fmt.Errorf("No namespace lister available when namespace scoped")
 		},
 		impl.Tracker)
 	r.ingressTranslator = &ingressTranslator
@@ -314,7 +329,7 @@ func NewController(ctx context.Context, cmw configmap.Watcher) *controller.Impl 
 }
 
 func getReadyIngresses(ctx context.Context, knativeClient networkingClientSet.NetworkingV1alpha1Interface) ([]*v1alpha1.Ingress, error) {
-	ingresses, err := knativeClient.Ingresses("").List(ctx, metav1.ListOptions{})
+	ingresses, err := knativeClient.Ingresses(injection.GetNamespaceScope(ctx)).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
