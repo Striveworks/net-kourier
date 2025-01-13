@@ -19,6 +19,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	"knative.dev/net-kourier/pkg/config"
 	"knative.dev/net-kourier/pkg/reconciler/informerfiltering"
@@ -31,6 +32,7 @@ import (
 
 var (
 	probeAddr = flag.String("probe-addr", "", "run this binary as a health check against the given address")
+	timeout   = flag.Int("timeout", 100, "timeout in milliseconds")
 )
 
 func main() {
@@ -38,7 +40,7 @@ func main() {
 
 	// Run the binary as a health checker if the respective flag is given.
 	if *probeAddr != "" {
-		os.Exit(check(*probeAddr))
+		os.Exit(check(*probeAddr, time.Duration(*timeout)*time.Millisecond))
 	}
 
 	ctx := informerfiltering.GetContextWithFilteringLabelSelector(signals.NewContext())

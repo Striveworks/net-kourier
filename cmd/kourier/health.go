@@ -34,10 +34,10 @@ const (
 	// unhealthy indicates rpc succeeded but indicates unhealthy service.
 	unhealthy = 4
 
-	timeout = 100 * time.Millisecond
+	// timeout = 100 * time.Millisecond
 )
 
-func check(addr string) int {
+func check(addr string, timeout time.Duration) int {
 	dialCtx, dialCancel := context.WithTimeout(context.Background(), timeout)
 	defer dialCancel()
 	conn, err := grpc.DialContext(dialCtx, addr, grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -46,7 +46,9 @@ func check(addr string) int {
 		return connectionFailure
 	}
 	defer conn.Close()
+	log.Printf("connected to service at %q", addr)
 
+	now := time.Now()
 	rpcCtx, rpcCancel := context.WithTimeout(context.Background(), timeout)
 	defer rpcCancel()
 	resp, err := healthpb.NewHealthClient(conn).Check(rpcCtx, &healthpb.HealthCheckRequest{Service: ""})
@@ -54,6 +56,7 @@ func check(addr string) int {
 		log.Printf("failed to do health rpc call: %+v", err)
 		return rpcFailure
 	}
+	log.Printf("check took %vs", time.Since(now).Seconds())
 
 	if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 		log.Printf("service unhealthy (responded with %q)", resp.GetStatus().String())

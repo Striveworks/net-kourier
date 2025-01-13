@@ -73,11 +73,16 @@ func (r *Reconciler) ReconcileKind(ctx context.Context, ing *v1alpha1.Ingress) r
 	}
 
 	ing.Status.MarkNetworkConfigured()
+	externalName, internalName := config.ServiceHostnames()
+	logging.FromContext(ctx).Infof("checking service hostnames %v %v and ing '%v' has status %+v",
+		externalName, internalName, ing.Name, ing.Status)
 	if !ing.IsReady() || !isExpectedLoadBalancer(ing) {
 		ready, err := r.statusManager.IsReady(ctx, before)
 		if err != nil {
+			logging.FromContext(ctx).Errorf("failed to probe ingress %v", err)
 			return fmt.Errorf("failed to probe Ingress: %w", err)
 		}
+		logging.FromContext(ctx).Infof("for ingress %v status manager is ready=%v err=%v", ing.Name, ready, err)
 		if ready {
 			external, internal := config.ServiceHostnames()
 
